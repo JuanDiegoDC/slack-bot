@@ -1,0 +1,5 @@
+node_modules
+env.sh
+credentials.json
+slack-bot.json
+.DS_Store
