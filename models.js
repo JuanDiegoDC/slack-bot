@@ -3,7 +3,7 @@ var Schema = mongoose.Schema;
 
 var userSchema = new Schema({
   token: {
-    type: Object,
+    type: String,
     required: false
   },
   slackId: String,

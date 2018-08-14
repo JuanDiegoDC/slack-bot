@@ -14,6 +14,8 @@ const app = express();
 app.use(bodyParser.json());
 
 let credentials = {};
+const timezone = "PDT";
+const dateTime = "12:00";
 
 fs.readFile('credentials.json', (err, content) => {
   if (err) return console.log('Error loading client secret file:', err);
@@ -23,7 +25,7 @@ fs.readFile('credentials.json', (err, content) => {
 
 // An access token (from your Slack app or custom integration - usually xoxb)
 const token = process.env.SLACK_TOKEN;
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 const TOKEN_PATH = 'token.json';
 
 // The client is initialized and then started to get an active connection to the platform
@@ -39,15 +41,27 @@ mongoose.connect(process.env.MONGODB_URI, {useNewUrlParser: true}, (error) => {
   }
 });
 
-app.get("/auth/redirect/:user", (req, res) => {
-  const user = req.params.user;
+app.get("/auth/redirect/:userinfo", (req, res) => {
+  const userInfoArr = req.params.userinfo.split("-");
+  const user = userInfoArr[0];
   const code = req.query.code;
+  const sessionId = userInfoArr[1];
   console.log("User:", user);
   console.log("Code:", code);
+  console.log("Session ID:", sessionId);
 
   if (user && code) {
-    setToken(user, code, () => {
-      res.status(200).send("OK");
+    setToken(user, sessionId, code, () => {
+      rtm.sendMessage("Token set successfully! You can now set events using this bot!", sessionId)
+        .then((resp) => {
+          // `res` contains information about the posted message
+          console.log('Message sent from bot: ', resp);
+          res.status(200).send("OK");
+        })
+        .catch((err) => {
+          console.log("Error: ", err);
+          res.status(500).send("FAIL");
+        });
     });
   }
   else {
@@ -55,19 +69,13 @@ app.get("/auth/redirect/:user", (req, res) => {
   }
 });
 
-app.get("/test", (req, res) => {
-  console.log("TESTED!");
-  const code = req.query.code;
-  console.log("Code:", code);
-
-  res.status(200).send("OK");
-});
-
 app.post("/webhook", (req, res) => {
   const botMessage = req.body.result.fulfillment.speech
   const sessionId = req.body.sessionId;
   const intentName = req.body.result.metadata.intentName;
   const slackId = req.body.originalRequest.data.user;
+  const parameters = req.body.result.parameters;
+  console.log("Parameters:", parameters);
   console.log("Request body", req.body);
   console.log("Robot reply:", botMessage);
   console.log("Session ID:", sessionId);
@@ -81,6 +89,7 @@ app.post("/webhook", (req, res) => {
         console.log("FindOne error:", error);
       }
       else if (!user) {
+        //User doesn't exist
         let newUser = new User({
           slackId: slackId,
           slackDmId: sessionId,
@@ -92,6 +101,21 @@ app.post("/webhook", (req, res) => {
             }
             getAccessToken(sessionId, slackId);
         })
+      }
+      else {
+        //User does exist
+        console.log("Found user:", user);
+        createEvent("TEST", parameters.date, user.token);
+        rtm.sendMessage("Event created!", sessionId)
+          .then((resp) => {
+            // `res` contains information about the posted message
+            console.log('Message sent from bot: ', resp);
+            res.status(200).send("OK");
+          })
+          .catch((err) => {
+            console.log("Error: ", err);
+            res.status(500).send("FAIL");
+          });
       }
     })
   }
@@ -173,16 +197,44 @@ rtm.on('message', (event) => {
 //   authorize(JSON.parse(content), listEvents);
 // });
 
-function setToken(userId, code, callback) {
+function createEvent(eventName, eventStart, token) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
-      client_id, client_secret, `http://localhost:1337/auth/redirect/${userId}`);
+      client_id, client_secret, `http://localhost:1337/auth/redirect/`);
+
+  oAuth2Client.setCredentials(JSON.parse(token));
+  const calendar = google.calendar({version: "v3", oAuth2Client});
+  const startTime = new Date(eventStart);
+  startTime.setHours(12,0,0);
+  const endTime = new Date(startTime.valueOf() + 1000*3600);
+  calendar.events.insert({
+    auth: oAuth2Client,
+    calendarId: "primary",
+    resource: {
+      summary: eventName,
+      start: {
+        dateTime: startTime.toISOString(),
+        timezone: timezone
+      },
+      end: {
+        dateTime: endTime.toISOString(),
+        timezone: timezone
+      }
+    }
+  });
+}
+
+function setToken(userId, sessionId, code, callback) {
+  const {client_secret, client_id, redirect_uris} = credentials.installed;
+  const oAuth2Client = new google.auth.OAuth2(
+      client_id, client_secret, `http://localhost:1337/auth/redirect/${userId}-${sessionId}`);
+  console.log("Code at setToken:", code);
   oAuth2Client.getToken(code, (err, token) => {
     if (err) {
-      return console.log("Error retrieving token");
+      return console.log("Error retrieving token:", err);
     }
     else {
-      User.findOneAndUpdate({slackId: userId}, {token: token}, (error) => {
+      User.findOneAndUpdate({slackId: userId}, {token: JSON.stringify(token)}, (error) => {
         if (error) {
           console.log("Update error:", error);
         }
@@ -198,7 +250,7 @@ function setToken(userId, code, callback) {
  * @param {Object} credentials The authorization client credentials.
  * @param {function} callback The callback to call with the authorized client.
  */
-function authorize(credentials, token, userId, callback) {
+function authorize(token, userId, callback) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
       client_id, client_secret, `http://localhost:1337/auth/redirect/${userId}`);
@@ -216,7 +268,7 @@ function authorize(credentials, token, userId, callback) {
 function getAccessToken(sessionId, userId) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
-      client_id, client_secret, `http://localhost:1337/auth/redirect/${userId}`);
+      client_id, client_secret, `http://localhost:1337/auth/redirect/${userId}-${sessionId}`);
 
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -238,28 +290,28 @@ function getAccessToken(sessionId, userId) {
  * Lists the next 10 events on the user's primary calendar.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
-// function listEvents(auth) {
-//   const calendar = google.calendar({version: 'v3', auth});
-//   calendar.events.list({
-//     calendarId: 'primary',
-//     timeMin: (new Date()).toISOString(),
-//     maxResults: 10,
-//     singleEvents: true,
-//     orderBy: 'startTime',
-//   }, (err, res) => {
-//     if (err) return console.log('The API returned an error: ' + err);
-//     const events = res.data.items;
-//     if (events.length) {
-//       console.log('Upcoming 10 events:');
-//       events.map((event, i) => {
-//         const start = event.start.dateTime || event.start.date;
-//         console.log(`${start} - ${event.summary}`);
-//       });
-//     } else {
-//       console.log('No upcoming events found.');
-//     }
-//   });
-// }
+function listEvents(auth) {
+  const calendar = google.calendar({version: 'v3', auth});
+  calendar.events.list({
+    calendarId: 'primary',
+    timeMin: (new Date()).toISOString(),
+    maxResults: 10,
+    singleEvents: true,
+    orderBy: 'startTime',
+  }, (err, res) => {
+    if (err) return console.log('The API returned an error: ' + err);
+    const events = res.data.items;
+    if (events.length) {
+      console.log('Upcoming 10 events:');
+      events.map((event, i) => {
+        const start = event.start.dateTime || event.start.date;
+        console.log(`${start} - ${event.summary}`);
+      });
+    } else {
+      console.log('No upcoming events found.');
+    }
+  });
+}
 
 app.listen(1337, () => {
   console.log("Connected!");
