@@ -16,9 +16,21 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 const TOKEN_PATH = 'token.json';
 
 
-app.post("/", (req, res) => {
-  console.log(req.body);
-  res.send("Request received!");
+app.post("/webhook", (req, res) => {
+  const botMessage = req.body.result.fulfillment.speech;
+  console.log("Request body result:", req.body.result);
+  console.log("Robot reply:", botMessage);
+
+  rtm.sendMessage(botMessage, conversationId)
+    .then((resp) => {
+      // `res` contains information about the posted message
+      console.log('Message sent from bot: ', resp);
+    })
+    .catch((err) => {
+      console.log("Error: ", err);
+    });
+
+  res.status(200).send("Request received!");
 });
 
 // The client is initialized and then started to get an active connection to the platform
@@ -53,10 +65,10 @@ function forwardInput(event) {
     }
   })
   .then((response) => {
-    console.log("Response:", response)
+    //console.log("Response:", response)
   })
   .catch((error) => {
-    console.log(error);
+    console.log("Error:", error);
   });
 }
 
@@ -156,5 +168,5 @@ function listEvents(auth) {
 }
 
 app.listen(1337, () => {
-  console.log("Conntected!");
+  console.log("Connected!");
 });
