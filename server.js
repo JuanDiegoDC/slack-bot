@@ -6,6 +6,9 @@ import axios from "axios";
 import express from "express";
 const {google} = require('googleapis');
 import bodyParser from "body-parser";
+import models from "./models.js";
+import mongoose from "mongoose";
+const User = models.User;
 
 const app = express();
 app.use(bodyParser.json())
@@ -15,13 +18,59 @@ const token = process.env.SLACK_TOKEN;
 const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 const TOKEN_PATH = 'token.json';
 
+// The client is initialized and then started to get an active connection to the platform
+const rtm = new RTMClient(token);
+rtm.start();
+
+mongoose.connect(process.env.MONGODB_URI, {useNewUrlParser: true}, (error) => {
+  if (error) {
+    console.log(error);
+  }
+  else {
+    console.log("Success, connected to MongoDB!");
+  }
+})
+
+app.get("/test", (req, res) => {
+  console.log("TESTED!");
+  const code = req.query.code;
+  console.log("Code:", code);
+
+  res.status(200).send("OK");
+});
 
 app.post("/webhook", (req, res) => {
-  const botMessage = req.body.result.fulfillment.speech;
-  console.log("Request body result:", req.body.result);
+  const botMessage = req.body.result.fulfillment.speech
+  const sessionId = req.body.sessionId;
+  const intentName = req.body.result.metadata.intentName;
+  const slackId = req.body.originalRequest.data.user;
+  console.log("Request body", req.body);
   console.log("Robot reply:", botMessage);
+  console.log("Session ID:", sessionId);
+  console.log("intentName:", intentName);
+  console.log("slack ID:", slackId);
 
-  rtm.sendMessage(botMessage, conversationId)
+  if (intentName === "remind:add") {
+    User.findOne({slackId: slackId}, (error, user) => {
+      if (error) {
+        console.log("FindOne error:", error);
+      }
+      else if (!user) {
+        let newUser = new User({
+          slackId: slackId,
+          slackDmId: sessionId,
+        });
+        newUser.save()
+          .then((err) => {
+            if(err) {
+              console.log("Save error:", err);
+            }
+        })
+      }
+    })
+  }
+
+  rtm.sendMessage(botMessage, sessionId)
     .then((resp) => {
       // `res` contains information about the posted message
       console.log('Message sent from bot: ', resp);
@@ -33,34 +82,13 @@ app.post("/webhook", (req, res) => {
   res.status(200).send("Request received!");
 });
 
-// The client is initialized and then started to get an active connection to the platform
-const rtm = new RTMClient(token);
-rtm.start();
 
-const rtm = new RTMClient(token);
-
-rtm.start();
-
-rtm.on('message', function(event) {
-  console.log(event);
-  if (event.type !== 'message') {
-    return
-  }
-  handleMessage(event);
-})
-
-handleMessage = (event) => {
-  axios.get(`url goes here`, )
-  .then(res => {
-
-  })
-}
 
 // This argument can be a channel ID, a DM ID, a MPDM ID, or a group ID
-const conversationId = 'DC7077XLY';
+const defaultChannel = 'DC7077XLY';
 
 // The RTM client can send simple string messages
-rtm.sendMessage('Bot waking up', conversationId)
+rtm.sendMessage('Bot waking up', defaultChannel)
   .then((res) => {
     // `res` contains information about the posted message
     console.log('Message sent: ', res);
@@ -78,9 +106,17 @@ function forwardInput(event) {
       "Authorization": "Bearer " + process.env.CLIENT_ACCESS_TOKEN
     },
     data: {
-      "sessionId": event.user,
+      "sessionId": event.channel,
       "lang": "en",
-      "query": event.text
+      "query": event.text,
+      originalRequest: {
+        source: "slack",
+        data: {
+          user: event.user,
+          text: event.text,
+          channel: event.channel
+        }
+      }
     }
   })
   .then((response) => {
@@ -103,11 +139,11 @@ rtm.on('message', (event) => {
 });
 
 // Load client secrets from a local file.
-// fs.readFile('credentials.json', (err, content) => {
-//   if (err) return console.log('Error loading client secret file:', err);
-//   // Authorize a client with credentials, then call the Google Calendar API.
-//   authorize(JSON.parse(content), listEvents);
-// });
+fs.readFile('credentials.json', (err, content) => {
+  if (err) return console.log('Error loading client secret file:', err);
+  // Authorize a client with credentials, then call the Google Calendar API.
+  authorize(JSON.parse(content), listEvents);
+});
 
 /**
  * Create an OAuth2 client with the given credentials, and then execute the
@@ -118,7 +154,7 @@ rtm.on('message', (event) => {
 function authorize(credentials, callback) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
-      client_id, client_secret, redirect_uris[0]);
+      client_id, client_secret, redirect_uris[1]);
 
   // Check if we have previously stored a token.
   fs.readFile(TOKEN_PATH, (err, token) => {

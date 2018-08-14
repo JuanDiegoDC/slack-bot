@@ -1,5 +1,5 @@
 {
-  "name": "react-scheduler",
+  "name": "slackbot",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -21,6 +21,7 @@
     "axios": "^0.18.0",
     "body-parser": "^1.18.3",
     "express": "^4.16.3",
-    "googleapis": "^27.0.0"
+    "googleapis": "^27.0.0",
+    "mongoose": "^5.2.8"
   }
 }

@@ -2,11 +2,11 @@ var mongoose = require('mongoose');
 var Schema = mongoose.Schema;
 
 var userSchema = new Schema({
-  googleCalendarAccount: {
-    accessToken: String,
-    refreshToken: String
+  token: {
+    type: Object,
+    required: false
   },
-  slackID: String,
+  slackId: String,
   slackUsername: String,
   slackEmail: String,
   slackDmId: String,
