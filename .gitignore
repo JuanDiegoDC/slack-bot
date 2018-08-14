@@ -3,7 +3,5 @@ env.sh
 credentials.json
 slack-bot.json
 .DS_Store
-
-package.json
-
+token.json
 package-lock.json
