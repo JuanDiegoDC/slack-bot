@@ -9,6 +9,7 @@ import bodyParser from "body-parser";
 import models from "./models.js";
 import mongoose from "mongoose";
 const User = models.User;
+const Meeting = models.Meeting;
 
 const app = express();
 app.use(bodyParser.json());
@@ -128,7 +129,8 @@ app.post("/webhook", (req, res) => {
   console.log("intentName:", intentName);
   console.log("slack ID:", slackId);
 
-  if (intentName !== "Default Fallback Intent") {
+  if (intentName !== "Default Fallback Intent" && intentName !== "Default Welcome Intent") {
+    console.log("\nnot Default callback or welcome intent\n");
     User.findOne({slackId: slackId}, (error, user) => {
       if (error) {
         console.log("FindOne error:", error);
@@ -155,26 +157,57 @@ app.post("/webhook", (req, res) => {
         else if (intentName === "remind:add") {
           console.log("\nremind:add\n");
           createEvent(parameters.Chore, parameters.date, user.token);
+          rtm.sendMessage("Event created!", sessionId)
+            .then((resp) => {
+              // `res` contains information about the posted message
+              console.log('Message sent from bot: ', resp);
+            })
+            .catch((err) => {
+              console.log("Error: ", err);
+            });
         }
 
         else if (intentName === "meeting:add") {
           console.log("\nmeeting:add\n");
-          createMeeting(parameters["given-name"], parameters.topic, parameters.date, parameters.time, user.token)
+          if (parameters["given-name"] && parameters.topic && parameters.date && parameters.time) {
+            console.log("Tries to create meeting");
+            createMeeting(user, parameters["given-name"], parameters.topic, parameters.date, parameters.time);
+            rtm.sendMessage(botMessage, sessionId)
+              .then((resp) => {
+                // `res` contains information about the posted message
+                console.log('Message sent from bot: ', resp);
+              })
+              .catch((err) => {
+                console.log("Error: ", err);
+              });
+          }
+          else {
+            rtm.sendMessage(botMessage, sessionId)
+              .then((resp) => {
+                // `res` contains information about the posted message
+                console.log('Message sent from bot: ', resp);
+              })
+              .catch((err) => {
+                console.log("Error: ", err);
+              });
+          }
         }
-
-        rtm.sendMessage("Event created!", sessionId)
-          .then((resp) => {
-            // `res` contains information about the posted message
-            console.log('Message sent from bot: ', resp);
-          })
-          .catch((err) => {
-            console.log("Error: ", err);
-          });
+        else {
+          rtm.sendMessage(botMessage, sessionId)
+            .then((resp) => {
+              // `res` contains information about the posted message
+              console.log('Message sent from bot: ', resp);
+            })
+            .catch((err) => {
+              console.log("Error: ", err);
+            });
+        }
       }
     });
   }
 
   else {
+    console.log("\nDefault fallback or welcome intent\n");
     rtm.sendMessage(botMessage, sessionId)
       .then((resp) => {
         // `res` contains information about the posted message
@@ -205,8 +238,6 @@ function getUserInfo(slackId) {
     });
   })
 }
-
-
 
 // This argument can be a channel ID, a DM ID, a MPDM ID, or a group ID
 const defaultChannel = 'DC7077XLY';
@@ -256,7 +287,12 @@ rtm.on('message', (event) => {
 
   console.log("Event:", event);
 
-  forwardInput(event);
+  if (event.bot_id) {
+    return;
+  }
+  else {
+    forwardInput(event);
+  }
 
   // Log the message
   //console.log(`(channel:${message.channel}) ${message.user} says: ${message.text}`)
@@ -300,21 +336,22 @@ function createEvent(eventName, eventStart, token) {
   });
 }
 
-function createMeeting(attendee, topic, eventDate, eventTime, token) {
+function createMeeting(owner, attendee, topic, eventDate, eventTime) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
       client_id, client_secret, `http://localhost:1337/auth/redirect/`);
-
+      
   User.findOne({displayName: attendee}, (error, user) => {
     if (error) {
       console.log(error);
     }
     else {
       if (user) {
-        oAuth2Client.setCredentials(JSON.parse(token));
+        oAuth2Client.setCredentials(JSON.parse(owner.token));
         const calendar = google.calendar({version: "v3", oAuth2Client});
         console.log("EventDate:", eventDate);
-        const startTime = new Date(eventDate + "T" + eventTime);
+        console.log("EventTime:", eventTime);
+        const startTime = new Date(String(eventDate) + "T" + String(eventTime));
         console.log("Start time before:", startTime);
         const endTime = new Date(startTime.valueOf() + 1000*1800);
         console.log("End time:", endTime);
@@ -337,6 +374,29 @@ function createMeeting(attendee, topic, eventDate, eventTime, token) {
                 email: user.slackEmail
               }
             ]
+          }
+        }, (err) => {
+          if (err) {
+            console.log("Calendar insert returned an error:", err);
+          }
+          else {
+            let newMeeting = new Meeting({
+              topic: topic,
+              owner: {
+                slackEmail: owner.slackEmail,
+                displayName: owner.displayName,
+                slackId: owner.slackId
+              },
+              date: eventDate,
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              attendees: [user]
+            });
+            newMeeting.save((err) => {
+              if (err) {
+                console.log(err);
+              }
+            });
           }
         });
       }

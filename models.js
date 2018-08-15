@@ -30,10 +30,39 @@ var taskSchema = new Schema({
   requesterid: String
 });
 
+const meetingSchema = new Schema({
+  topic: {
+    type: String,
+    required: true
+  },
+  attendees: {
+    type: Array,
+    required: true
+  },
+  date: {
+    type: String,
+    required: true,
+  },
+  startTime: {
+    type: String,
+    required: true
+  },
+  endTime: {
+    type: String,
+    required: true
+  },
+  owner: {
+    type: Object,
+    required: true
+  }
+});
+
 var User = mongoose.model('User', userSchema);
 var Task = mongoose.model('Task', taskSchema);
+var Meeting = mongoose.model("Meeting", meetingSchema);
 
 module.exports = {
   User: User,
-  Task: Task
+  Task: Task,
+  Meeting: Meeting
 }
