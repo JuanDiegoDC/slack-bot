@@ -110,11 +110,9 @@ app.post("/webhook", (req, res) => {
           .then((resp) => {
             // `res` contains information about the posted message
             console.log('Message sent from bot: ', resp);
-            res.status(200).send("OK");
           })
           .catch((err) => {
             console.log("Error: ", err);
-            res.status(500).send("FAIL");
           });
       }
     })
@@ -204,9 +202,12 @@ function createEvent(eventName, eventStart, token) {
 
   oAuth2Client.setCredentials(JSON.parse(token));
   const calendar = google.calendar({version: "v3", oAuth2Client});
-  const startTime = new Date(eventStart);
+  const startTime = new Date(Date(eventStart).valueOf() + 1000);
+  console.log("Start time before:", startTime);
   startTime.setHours(12,0,0);
-  const endTime = new Date(startTime.valueOf() + 1000*3600);
+  console.log("Start time after:", startTime);
+  const endTime = new Date(startTime.valueOf() + 1000*1800);
+  console.log("End time:", endTime);
   calendar.events.insert({
     auth: oAuth2Client,
     calendarId: "primary",
