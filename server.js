@@ -38,8 +38,54 @@ mongoose.connect(process.env.MONGODB_URI, {useNewUrlParser: true}, (error) => {
   }
   else {
     console.log("Success, connected to MongoDB!");
+    getMembers()
+      .then((res) => {
+        res.data.members.forEach((item) => {
+          User.findOne({slackId: item.id}, (error, user) => {
+            if (error) {
+              console.log(error);
+            }
+            if (!user) {
+              let newUser = new User({
+                slackId: item.id,
+                slackEmail: item.profile.email,
+                displayName: item.profile.display_name,
+              });
+              newUser.save((error) => {
+                if (error) {
+                  console.log("Error:", error);
+                }
+              });
+            }
+          });
+        });
+      })
+      .catch((err) => {
+        console.log("Error:", err);
+      });
   }
 });
+
+function getMembers() {
+  return new Promise((resolve, reject) => {
+    axios({
+      method: "GET",
+      url:"https://slack.com/api/users.list",
+      headers: {
+        Authorization: "Bearer " + process.env.SLACK_TOKEN
+      }
+    })
+    .then((res) => {
+      console.log("Response:", res);
+      console.log("Members:", res.data.members);
+      resolve(res);
+    })
+    .catch((err) => {
+      console.log(err);
+      reject(err);
+    });
+  });
+}
 
 app.get("/auth/redirect/:userinfo", (req, res) => {
   const userInfoArr = req.params.userinfo.split("-");
@@ -90,23 +136,8 @@ app.post("/webhook", (req, res) => {
       }
       else if (!user) {
         //User doesn't exist
-        let newUser = new User({
-          slackId: slackId,
-          slackDmId: sessionId,
-        });
-        newUser.save()
-          .then((err) => {
-            if(err) {
-              console.log("Save error:", err);
-            }
-            getAccessToken(sessionId, slackId);
-        })
-      }
-      else {
-        //User does exist
-        console.log("Found user:", user);
-        createEvent("TEST", parameters.date, user.token);
-        rtm.sendMessage("Event created!", sessionId)
+        //Log error
+        rtm.sendMessage("Spooky error occured, are you sure you are a member?", sessionId)
           .then((resp) => {
             // `res` contains information about the posted message
             console.log('Message sent from bot: ', resp);
@@ -114,6 +145,24 @@ app.post("/webhook", (req, res) => {
           .catch((err) => {
             console.log("Error: ", err);
           });
+      }
+      else {
+        //User does exists
+        console.log("Found user:", user);
+        if (!user.token) {
+          getAccessToken(sessionId, slackId);
+        }
+        else {
+          createEvent(parameters.Chore, parameters.date, user.token);
+          rtm.sendMessage("Event created!", sessionId)
+            .then((resp) => {
+              // `res` contains information about the posted message
+              console.log('Message sent from bot: ', resp);
+            })
+            .catch((err) => {
+              console.log("Error: ", err);
+            });
+        }
       }
     })
   }
@@ -131,6 +180,24 @@ app.post("/webhook", (req, res) => {
 
   res.status(200).send("Request received!");
 });
+
+function getUserInfo(slackId) {
+  return new Promise((resolve, reject) => {
+    axios({
+      method: "GET",
+      url: "https://slack.com/api/users.info?user=" + slackId,
+      headers: {
+        Authorization: "Bearer " + process.env.SLACK_TOKEN
+      }
+    })
+    .then((res) => {
+      resolve(res);
+    })
+    .catch((err) => {
+      reject(err);
+    });
+  })
+}
 
 
 
@@ -202,9 +269,10 @@ function createEvent(eventName, eventStart, token) {
 
   oAuth2Client.setCredentials(JSON.parse(token));
   const calendar = google.calendar({version: "v3", oAuth2Client});
-  const startTime = new Date(Date(eventStart).valueOf() + 1000);
+  console.log("Eventstart:", eventStart);
+  const startTime = new Date(eventStart + "T12:00:00");
   console.log("Start time before:", startTime);
-  startTime.setHours(12,0,0);
+  //startTime.setHours(12,0,0);
   console.log("Start time after:", startTime);
   const endTime = new Date(startTime.valueOf() + 1000*1800);
   console.log("End time:", endTime);

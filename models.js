@@ -10,6 +10,7 @@ var userSchema = new Schema({
   slackUsername: String,
   slackEmail: String,
   slackDmId: String,
+  displayName: String,
   meetingLength: {
     type: Number,
     default: 30
