@@ -128,8 +128,7 @@ app.post("/webhook", (req, res) => {
   console.log("intentName:", intentName);
   console.log("slack ID:", slackId);
 
-  if (intentName === "remind:add") {
-    console.log("\nremind:add\n");
+  if (intentName !== "Default Fallback Intent") {
     User.findOne({slackId: slackId}, (error, user) => {
       if (error) {
         console.log("FindOne error:", error);
@@ -150,21 +149,29 @@ app.post("/webhook", (req, res) => {
         //User does exists
         console.log("Found user:", user);
         if (!user.token) {
-          getAccessToken(sessionId, slackId);
+          return getAccessToken(sessionId, slackId);
         }
-        else {
+
+        else if (intentName === "remind:add") {
+          console.log("\nremind:add\n");
           createEvent(parameters.Chore, parameters.date, user.token);
-          rtm.sendMessage("Event created!", sessionId)
-            .then((resp) => {
-              // `res` contains information about the posted message
-              console.log('Message sent from bot: ', resp);
-            })
-            .catch((err) => {
-              console.log("Error: ", err);
-            });
         }
+
+        else if (intentName === "meeting:add") {
+          console.log("\nmeeting:add\n");
+          createMeeting(parameters["given-name"], parameters.topic, parameters.date, parameters.time, user.token)
+        }
+
+        rtm.sendMessage("Event created!", sessionId)
+          .then((resp) => {
+            // `res` contains information about the posted message
+            console.log('Message sent from bot: ', resp);
+          })
+          .catch((err) => {
+            console.log("Error: ", err);
+          });
       }
-    })
+    });
   }
 
   else {
@@ -288,6 +295,53 @@ function createEvent(eventName, eventStart, token) {
       end: {
         dateTime: endTime.toISOString(),
         timezone: timezone
+      }
+    }
+  });
+}
+
+function createMeeting(attendee, topic, eventDate, eventTime, token) {
+  const {client_secret, client_id, redirect_uris} = credentials.installed;
+  const oAuth2Client = new google.auth.OAuth2(
+      client_id, client_secret, `http://localhost:1337/auth/redirect/`);
+
+  User.findOne({displayName: attendee}, (error, user) => {
+    if (error) {
+      console.log(error);
+    }
+    else {
+      if (user) {
+        oAuth2Client.setCredentials(JSON.parse(token));
+        const calendar = google.calendar({version: "v3", oAuth2Client});
+        console.log("EventDate:", eventDate);
+        const startTime = new Date(eventDate + "T" + eventTime);
+        console.log("Start time before:", startTime);
+        const endTime = new Date(startTime.valueOf() + 1000*1800);
+        console.log("End time:", endTime);
+        calendar.events.insert({
+          auth: oAuth2Client,
+          calendarId: "primary",
+          resource: {
+            summary: topic,
+            start: {
+              dateTime: startTime.toISOString(),
+              timezone: timezone
+            },
+            end: {
+              dateTime: endTime.toISOString(),
+              timezone: timezone
+            },
+            attendees: [
+              {
+                displayName: attendee,
+                email: user.slackEmail
+              }
+            ]
+          }
+        });
+      }
+      else {
+        console.log("Attendee not found")
       }
     }
   });
