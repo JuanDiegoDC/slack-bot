@@ -340,71 +340,116 @@ function createMeeting(owner, attendee, topic, eventDate, eventTime) {
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(
       client_id, client_secret, `http://localhost:1337/auth/redirect/`);
-      
-  User.findOne({displayName: attendee}, (error, user) => {
+
+  let collision = true;
+
+  //Check for meeting collisions
+  Meeting.find({"owner.slackId": owner.slackId}, (error, meetings) => {
     if (error) {
       console.log(error);
     }
     else {
-      if (user) {
-        oAuth2Client.setCredentials(JSON.parse(owner.token));
-        const calendar = google.calendar({version: "v3", oAuth2Client});
-        console.log("EventDate:", eventDate);
-        console.log("EventTime:", eventTime);
-        const startTime = new Date(String(eventDate) + "T" + String(eventTime));
-        console.log("Start time before:", startTime);
-        const endTime = new Date(startTime.valueOf() + 1000*1800);
-        console.log("End time:", endTime);
-        calendar.events.insert({
-          auth: oAuth2Client,
-          calendarId: "primary",
-          resource: {
-            summary: topic,
-            start: {
-              dateTime: startTime.toISOString(),
-              timezone: timezone
-            },
-            end: {
-              dateTime: endTime.toISOString(),
-              timezone: timezone
-            },
-            attendees: [
-              {
-                displayName: attendee,
-                email: user.slackEmail
-              }
-            ]
-          }
-        }, (err) => {
-          if (err) {
-            console.log("Calendar insert returned an error:", err);
-          }
-          else {
-            let newMeeting = new Meeting({
-              topic: topic,
-              owner: {
-                slackEmail: owner.slackEmail,
-                displayName: owner.displayName,
-                slackId: owner.slackId
-              },
-              date: eventDate,
-              startTime: startTime.toISOString(),
-              endTime: endTime.toISOString(),
-              attendees: [user]
-            });
-            newMeeting.save((err) => {
-              if (err) {
-                console.log(err);
-              }
-            });
-          }
+      let count = 0;
+      let businessDayCount = 0;
+
+      //Check each business day for collision up to 7 days
+      while (businessDayCount < 7 && collision) {
+        console.log("Meetings:", meetings);
+        let eventDateCast = new Date(eventDate);
+        console.log('Event Date Cast is: ', eventDateCast);
+        let todayMeetings = meetings.filter((item) => {
+          return item.date === Date(eventDateCast.getDate() + count);
         });
-      }
-      else {
-        console.log("Attendee not found")
+        console.log("todayMeetings:", todayMeetings);
+        if (todayMeetings.length < 3) {
+          collision = false;
+        }
+        //Check for collision in that day's meetings
+        todayMeetings.forEach((meeting) => {
+          if (!(meeting.startTime.valueOf() + 1000*1800 > eventTime.valueOf() && meeting.startTime.valueOf() < eventTime.valueOf() + 1800 * 1000)){
+            collision = false;
+          }
+        })
+        if (eventDateCast.getDay() === 0 || eventDateCast.getDay() === 6) {
+          continue;
+        }
+        else {
+          businessDayCount++;
+        }
+        count++;
       }
     }
   });
+
+  if (!collision) {
+    User.findOne({displayName: attendee}, (error, user) => {
+      if (error) {
+        console.log(error);
+      }
+      else {
+        if (user) {
+          oAuth2Client.setCredentials(JSON.parse(owner.token));
+          const calendar = google.calendar({version: "v3", oAuth2Client});
+          console.log("EventDate:", eventDate);
+          console.log("EventTime:", eventTime);
+          const startTime = new Date(String(eventDate) + "T" + String(eventTime));
+          console.log("Start time before:", startTime);
+          const endTime = new Date(startTime.valueOf() + 1000*1800);
+          console.log("End time:", endTime);
+          calendar.events.insert({
+            auth: oAuth2Client,
+            calendarId: "primary",
+            resource: {
+              summary: topic,
+              start: {
+                dateTime: startTime.toISOString(),
+                timezone: timezone
+              },
+              end: {
+                dateTime: endTime.toISOString(),
+                timezone: timezone
+              },
+              attendees: [
+                {
+                  displayName: attendee,
+                  email: user.slackEmail
+                }
+              ]
+            }
+          }, (err) => {
+            if (err) {
+              console.log("Calendar insert returned an error:", err);
+            }
+            else {
+              let newMeeting = new Meeting({
+                topic: topic,
+                owner: {
+                  slackEmail: owner.slackEmail,
+                  displayName: owner.displayName,
+                  slackId: owner.slackId
+                },
+                date: eventDate,
+                startTime: startTime.toISOString(),
+                endTime: endTime.toISOString(),
+                attendees: [user]
+              });
+              newMeeting.save((err) => {
+                if (err) {
+                  console.log(err);
+                }
+              });
+            }
+          });
+        }
+        else {
+          console.log("Attendee not found")
+        }
+      }
+    });
+  }
+  else {
+    console.log("Meeting collision");
+  }
 }
 
 function setToken(userId, sessionId, code, callback) {
